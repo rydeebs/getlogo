@@ -152,17 +152,22 @@ def main():
     st.title("Website Logo Scraper with Mapping File")
     st.write("Upload an Excel file with website URLs to extract logos and create a mapping file for Google Drive")
     
-    # Use session state to store file data for downloads
+    # Initialize session state variables properly
     if 'has_run' not in st.session_state:
-        st.session_state.has_run = False
-        st.session_state.zip_data = None
-        st.session_state.mapping_data = None
-        st.session_state.excel_data = None
-        st.session_state.all_logos = []
+        st.session_state['has_run'] = False
+    if 'zip_data' not in st.session_state:
+        st.session_state['zip_data'] = None
+    if 'mapping_data' not in st.session_state:
+        st.session_state['mapping_data'] = None
+    if 'excel_data' not in st.session_state:
+        st.session_state['excel_data'] = None
+    if 'all_logos' not in st.session_state:
+        st.session_state['all_logos'] = []
     
     uploaded_file = st.file_uploader("Choose an Excel file", type=["xlsx", "xls", "csv"])
     
-    if uploaded_file:
+    # Move initialization logic based on uploaded file
+    if uploaded_file is not None:
         try:
             # Read the uploaded file
             if uploaded_file.name.endswith('.csv'):
@@ -178,9 +183,16 @@ def main():
             # Let the user select the column containing URLs
             url_column = st.selectbox("Select the column containing website URLs", df.columns)
             
-            if st.button("Extract Logos") or st.session_state.has_run:
+            # Only show the extract button if we haven't run yet
+            if not st.session_state['has_run']:
+                extract_button = st.button("Extract Logos")
+            else:
+                extract_button = False
+                
+            # Main extraction logic
+            if extract_button or st.session_state['has_run']:
                 # Skip processing if already run
-                if not st.session_state.has_run:
+                if not st.session_state['has_run']:
                     # Add a progress bar
                     progress_bar = st.progress(0)
                     status_text = st.empty()
@@ -227,7 +239,7 @@ def main():
                         
                         # Store zip data in session state
                         with open(zip_filename, "rb") as f:
-                            st.session_state.zip_data = f.read()
+                            st.session_state['zip_data'] = f.read()
                     
                     # Create mapping file
                     if mapping_data:
@@ -235,7 +247,7 @@ def main():
                         
                         # Store mapping data in session state
                         with open(mapping_filename, "rb") as f:
-                            st.session_state.mapping_data = f.read()
+                            st.session_state['mapping_data'] = f.read()
                     
                     # Save the results to Excel
                     output_filename = "logos_extraction_results.xlsx"
@@ -243,46 +255,46 @@ def main():
                     
                     # Store Excel data in session state
                     with open(output_filename, "rb") as file:
-                        st.session_state.excel_data = file.read()
+                        st.session_state['excel_data'] = file.read()
                     
                     # Store logos in session state
-                    st.session_state.all_logos = all_logos
+                    st.session_state['all_logos'] = all_logos
                     
                     # Set the flag to indicate processing is done
-                    st.session_state.has_run = True
+                    st.session_state['has_run'] = True
                 
                 # Display the results (whether just processed or retrieved from session state)
-                success_count = sum(1 for logo in st.session_state.all_logos)
+                success_count = sum(1 for logo in st.session_state['all_logos'])
                 st.success(f"Processed {len(df)} websites. Successfully extracted {success_count} logos.")
                 
                 # Display download buttons (these will persist because they use session state data)
                 col1, col2, col3 = st.columns(3)
                 
                 with col1:
-                    if st.session_state.zip_data:
+                    if st.session_state['zip_data']:
                         st.download_button(
                             label="Download All Logos (ZIP)",
-                            data=st.session_state.zip_data,
+                            data=st.session_state['zip_data'],
                             file_name="all_logos.zip",
                             mime="application/zip",
                             key="zip_download"
                         )
                 
                 with col2:
-                    if st.session_state.mapping_data:
+                    if st.session_state['mapping_data']:
                         st.download_button(
                             label="Download Mapping File (CSV)",
-                            data=st.session_state.mapping_data,
+                            data=st.session_state['mapping_data'],
                             file_name="logo_mapping.csv",
                             mime="text/csv",
                             key="mapping_download"
                         )
                 
                 with col3:
-                    if st.session_state.excel_data:
+                    if st.session_state['excel_data']:
                         st.download_button(
                             label="Download Results (Excel)",
-                            data=st.session_state.excel_data,
+                            data=st.session_state['excel_data'],
                             file_name="logos_extraction_results.xlsx",
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                             key="excel_download"
@@ -301,23 +313,21 @@ def main():
                 """)
                 
                 # Show thumbnails of the extracted logos
-                if st.session_state.all_logos:
+                if st.session_state['all_logos']:
                     st.subheader("Extracted Logos")
                     
                     # Create a grid layout
                     cols = st.columns(3)
-                    for i, logo in enumerate(st.session_state.all_logos):
+                    for i, logo in enumerate(st.session_state['all_logos']):
                         col = cols[i % 3]
                         with col:
                             st.image(logo['path'], caption=f"{logo['domain']}", width=150)
                 
                 # Button to reset and run again
                 if st.button("Reset and Run Again"):
-                    st.session_state.has_run = False
-                    st.session_state.zip_data = None
-                    st.session_state.mapping_data = None
-                    st.session_state.excel_data = None
-                    st.session_state.all_logos = []
+                    # Properly reset session state
+                    for key in ['has_run', 'zip_data', 'mapping_data', 'excel_data', 'all_logos']:
+                        st.session_state[key] = False if key == 'has_run' else [] if key == 'all_logos' else None
                     st.experimental_rerun()
         
         except Exception as e:
