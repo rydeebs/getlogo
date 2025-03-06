@@ -25,8 +25,8 @@ def get_site_logo(url):
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         }
-        response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()  # Raise exception for HTTP errors
+        # Reduced timeout to fail faster for non-responsive sites
+        response = requests.get(url, headers=headers, timeout=5)
         
         # Parse the HTML content
         soup = BeautifulSoup(response.text, 'html.parser')
@@ -78,8 +78,8 @@ def get_site_logo(url):
             img_url = urljoin(url, img_url)
             
             try:
-                # Download the image
-                img_response = requests.get(img_url, headers=headers, timeout=10)
+                # Download the image with shorter timeout
+                img_response = requests.get(img_url, headers=headers, timeout=5)
                 img_response.raise_for_status()
                 
                 # Check if it's a valid image
@@ -149,12 +149,30 @@ def create_mapping_file(mapping_data):
     return filename
 
 def main():
+    # Configure Streamlit to handle longer operations
+    st.set_page_config(
+        page_title="Website Logo Scraper",
+        page_icon="🖼️",
+        layout="wide",
+        initial_sidebar_state="expanded",
+    )
+    
     st.title("Website Logo Scraper with Mapping File")
     st.write("Upload an Excel file with website URLs to extract logos and create a mapping file for Google Drive")
+    
+    # Add a sidebar with settings
+    with st.sidebar:
+        st.header("Settings")
+        batch_size = st.slider("Batch size (URLs per run)", 5, 100, 20)
+        st.info("💡 Processing fewer URLs at once can help prevent timeouts")
     
     # Initialize session state variables properly
     if 'has_run' not in st.session_state:
         st.session_state['has_run'] = False
+    if 'all_batches_complete' not in st.session_state:
+        st.session_state['all_batches_complete'] = False
+    if 'current_batch' not in st.session_state:
+        st.session_state['current_batch'] = 0
     if 'zip_data' not in st.session_state:
         st.session_state['zip_data'] = None
     if 'mapping_data' not in st.session_state:
@@ -163,6 +181,8 @@ def main():
         st.session_state['excel_data'] = None
     if 'all_logos' not in st.session_state:
         st.session_state['all_logos'] = []
+    if 'processed_urls' not in st.session_state:
+        st.session_state['processed_urls'] = set()
     
     uploaded_file = st.file_uploader("Choose an Excel file", type=["xlsx", "xls", "csv"])
     
@@ -205,30 +225,57 @@ def main():
                     df['logo_found'] = False
                     df['logo_filename'] = None
                     
-                    # Process each URL
-                    for i, row in df.iterrows():
+                    # Add batch processing to prevent timeouts
+                    if 'current_batch' not in st.session_state:
+                        st.session_state['current_batch'] = 0
+                        
+                    # Get the total number of batches
+                    total_rows = len(df)
+                    total_batches = (total_rows + batch_size - 1) // batch_size
+                    current_batch = st.session_state['current_batch']
+                    
+                    # Calculate start and end indices for this batch
+                    start_idx = current_batch * batch_size
+                    end_idx = min(start_idx + batch_size, total_rows)
+                    
+                    # Show batch progress information
+                    st.info(f"Processing batch {current_batch + 1} of {total_batches} (URLs {start_idx + 1} to {end_idx} of {total_rows})")
+                    
+                    # Process URLs in the current batch only
+                    for i in range(start_idx, end_idx):
+                        row = df.iloc[i]
                         url = str(row[url_column])
                         status_text.text(f"Processing {i+1}/{len(df)}: {url}")
                         
-                        # Get the logo
-                        logo_info = get_site_logo(url)
-                        
-                        # Update the DataFrame and mapping data
-                        if logo_info:
-                            df.at[i, 'logo_found'] = True
-                            df.at[i, 'logo_filename'] = logo_info['filename']
-                            all_logos.append(logo_info)
-                            mapping_data.append({
-                                'url': url,
-                                'domain': logo_info['domain'],
-                                'filename': logo_info['filename']
-                            })
-                        
-                        # Update progress
-                        progress_bar.progress((i + 1) / len(df))
-                        
-                        # Small delay to prevent overwhelming websites
-                        time.sleep(0.5)
+                        try:
+                            # Get the logo with a timeout limit for the entire operation
+                            logo_info = get_site_logo(url)
+                            
+                            # Update the DataFrame and mapping data
+                            if logo_info:
+                                df.at[i, 'logo_found'] = True
+                                df.at[i, 'logo_filename'] = logo_info['filename']
+                                all_logos.append(logo_info)
+                                mapping_data.append({
+                                    'url': url,
+                                    'domain': logo_info['domain'],
+                                    'filename': logo_info['filename']
+                                })
+                                
+                                # Save partial progress after each successful logo extraction
+                                # Save logos to session state incrementally
+                                st.session_state['all_logos'] = all_logos
+                                
+                            # Update progress regardless of success
+                            progress_bar.progress((i + 1) / len(df))
+                            
+                            # Reduced delay between requests
+                            time.sleep(0.2)
+                        except Exception as e:
+                            # Log the error but continue with the next URL
+                            st.error(f"Error processing {url}: {str(e)}")
+                            # Still update progress
+                            progress_bar.progress((i + 1) / len(df))
                     
                     # Create a zip file with all logos
                     if all_logos:
@@ -260,12 +307,30 @@ def main():
                     # Store logos in session state
                     st.session_state['all_logos'] = all_logos
                     
-                    # Set the flag to indicate processing is done
-                    st.session_state['has_run'] = True
+                    # Update the batch counter for the next run
+                    st.session_state['current_batch'] += 1
+                    
+                    # Check if all batches are done
+                    if st.session_state['current_batch'] >= total_batches:
+                        st.session_state['has_run'] = True
+                        st.session_state['all_batches_complete'] = True
+                    else:
+                        st.session_state['has_run'] = False  # Allow continuing to the next batch
+                        # Force a rerun to process the next batch
+                        st.experimental_rerun()
                 
-                # Display the results (whether just processed or retrieved from session state)
-                success_count = sum(1 for logo in st.session_state['all_logos'])
-                st.success(f"Processed {len(df)} websites. Successfully extracted {success_count} logos.")
+                # Check if we have completed all batches
+                if 'all_batches_complete' in st.session_state and st.session_state['all_batches_complete']:
+                    # Display the final results
+                    success_count = sum(1 for logo in st.session_state['all_logos'])
+                    st.success(f"✅ Complete! Processed {len(df)} websites. Successfully extracted {success_count} logos.")
+                else:
+                    # Display in-progress message
+                    current_progress = st.session_state['current_batch'] * batch_size
+                    total_sites = len(df)
+                    progress_percentage = min(100, int((current_progress / total_sites) * 100))
+                    success_count = sum(1 for logo in st.session_state['all_logos'])
+                    st.warning(f"⏳ In progress: {progress_percentage}% complete. Extracted {success_count} logos so far.")
                 
                 # Display download buttons (these will persist because they use session state data)
                 col1, col2, col3 = st.columns(3)
@@ -326,8 +391,11 @@ def main():
                 # Button to reset and run again
                 if st.button("Reset and Run Again"):
                     # Properly reset session state
-                    for key in ['has_run', 'zip_data', 'mapping_data', 'excel_data', 'all_logos']:
-                        st.session_state[key] = False if key == 'has_run' else [] if key == 'all_logos' else None
+                    for key in ['has_run', 'zip_data', 'mapping_data', 'excel_data', 'all_logos', 'current_batch', 'all_batches_complete']:
+                        if key in st.session_state:
+                            st.session_state[key] = False if key in ['has_run', 'all_batches_complete'] else \
+                                                    0 if key == 'current_batch' else \
+                                                    [] if key == 'all_logos' else None
                     st.experimental_rerun()
         
         except Exception as e:
