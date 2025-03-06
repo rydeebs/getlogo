@@ -1,6 +1,9 @@
 import streamlit as st
 import pandas as pd
 import requests
+import urllib3
+# Disable SSL warnings that will appear when verify=False is used
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 from bs4 import BeautifulSoup
 import os
 import uuid
@@ -25,8 +28,14 @@ def get_site_logo(url):
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         }
-        # Reduced timeout to fail faster for non-responsive sites
-        response = requests.get(url, headers=headers, timeout=5)
+        
+        # Add SSL verification disable for problematic sites
+        response = requests.get(
+            url, 
+            headers=headers, 
+            timeout=5,
+            verify=False  # Disable SSL verification
+        )
         
         # Parse the HTML content
         soup = BeautifulSoup(response.text, 'html.parser')
@@ -78,8 +87,13 @@ def get_site_logo(url):
             img_url = urljoin(url, img_url)
             
             try:
-                # Download the image with shorter timeout
-                img_response = requests.get(img_url, headers=headers, timeout=5)
+                # Download the image with shorter timeout and disabled SSL verification
+                img_response = requests.get(
+                    img_url, 
+                    headers=headers, 
+                    timeout=5,
+                    verify=False  # Disable SSL verification
+                )
                 img_response.raise_for_status()
                 
                 # Check if it's a valid image
@@ -317,7 +331,7 @@ def main():
                     else:
                         st.session_state['has_run'] = False  # Allow continuing to the next batch
                         # Force a rerun to process the next batch
-                        st.experimental_rerun()
+                        st.rerun()
                 
                 # Check if we have completed all batches
                 if 'all_batches_complete' in st.session_state and st.session_state['all_batches_complete']:
@@ -396,7 +410,7 @@ def main():
                             st.session_state[key] = False if key in ['has_run', 'all_batches_complete'] else \
                                                     0 if key == 'current_batch' else \
                                                     [] if key == 'all_logos' else None
-                    st.experimental_rerun()
+                    st.rerun()
         
         except Exception as e:
             st.error(f"An error occurred: {str(e)}")
